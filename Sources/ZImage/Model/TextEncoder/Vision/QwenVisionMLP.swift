@@ -17,19 +17,14 @@ final class QwenVisionMLP: Module {
   }
 
   func callAsFunction(_ hiddenStates: MLXArray) -> MLXArray {
-    let originalType = hiddenStates.dtype
-    let input = hiddenStates
-    var gated = gate(input)
+    var gated = gate(hiddenStates)
     switch activation {
     case .geluApproximate:
       gated = MLXNN.geluFastApproximate(gated)
     case .silu:
       gated = MLXNN.silu(gated)
     }
-    let upProjected = up(input)
-    var hidden = gated * upProjected
-    hidden = down(hidden)
-    return hidden.asType(originalType)
+    return down(gated * up(hiddenStates))
   }
 
 }

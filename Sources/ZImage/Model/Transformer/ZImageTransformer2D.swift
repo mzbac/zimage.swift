@@ -12,20 +12,17 @@ private struct TransformerCacheKey: Hashable {
 
 private struct TransformerCache {
   let capFreqs: MLXArray
-  let capAttnMask: MLXArray
   let capPadMask: MLXArray?
   let capSeqLen: Int
   let capPad: Int
 
   let imgFreqs: MLXArray
-  let imgAttnMask: MLXArray
   let imgPadMask: MLXArray?
   let imgSeqLen: Int
   let imgPad: Int
   let imageTokens: Int
 
   let unifiedFreqsCis: MLXArray
-  let unifiedAttnMask: MLXArray
 
   let fTokens: Int
   let hTokens: Int
@@ -47,7 +44,6 @@ public final class ZImageTransformer2DModel: Module {
   private var xPadToken: MLXArray?
   private var capPadToken: MLXArray?
 
-  /// Cache for position embeddings and masks (cleared when dimensions change)
   private var cache: TransformerCache?
   private var cacheKey: TransformerCacheKey?
 
@@ -217,7 +213,6 @@ public final class ZImageTransformer2DModel: Module {
       start: (1, 0, 0)
     ).reshaped(capSeqLen, 3)
     let capFreqs = ropeEmbedder(ids: capPosIds)
-    let capAttnMask = MLX.ones([batch, capSeqLen], dtype: .bool)
 
     var capPadMask: MLXArray? = nil
     if capPad > 0 {
@@ -245,7 +240,6 @@ public final class ZImageTransformer2DModel: Module {
     ).reshaped(imgPad, 3)
     let imgPosIds = MLX.concatenated([imgPos, imgPadPos], axis: 0)
     let imgFreqs = ropeEmbedder(ids: imgPosIds)
-    let imgAttnMask = MLX.ones([batch, imgSeqLen], dtype: .bool)
 
     var imgPadMask: MLXArray? = nil
     if imgPad > 0 {
@@ -257,22 +251,18 @@ public final class ZImageTransformer2DModel: Module {
     }
 
     let unifiedFreqsCis = MLX.concatenated([imgFreqs, capFreqs], axis: 0)
-    let unifiedAttnMask = MLX.concatenated([imgAttnMask, capAttnMask], axis: 1)
 
     let newCache = TransformerCache(
       capFreqs: capFreqs,
-      capAttnMask: capAttnMask,
       capPadMask: capPadMask,
       capSeqLen: capSeqLen,
       capPad: capPad,
       imgFreqs: imgFreqs,
-      imgAttnMask: imgAttnMask,
       imgPadMask: imgPadMask,
       imgSeqLen: imgSeqLen,
       imgPad: imgPad,
       imageTokens: imageTokens,
       unifiedFreqsCis: unifiedFreqsCis,
-      unifiedAttnMask: unifiedAttnMask,
       fTokens: fTokens,
       hTokens: hTokens,
       wTokens: wTokens
@@ -360,7 +350,7 @@ public final class ZImageTransformer2DModel: Module {
     for block in noiseRefiner {
       noiseStream = block(
         noiseStream,
-        attnMask: cached.imgAttnMask,
+        attnMask: nil,
         freqsCis: cached.imgFreqs,
         adalnInput: tEmb
       )
@@ -370,7 +360,7 @@ public final class ZImageTransformer2DModel: Module {
     for block in contextRefiner {
       capStream = block(
         capStream,
-        attnMask: cached.capAttnMask,
+        attnMask: nil,
         freqsCis: cached.capFreqs,
         adalnInput: nil
       )
@@ -379,7 +369,7 @@ public final class ZImageTransformer2DModel: Module {
     var unified = MLX.concatenated([noiseStream, capStream], axis: 1)
 
     for block in layers {
-      unified = block(unified, attnMask: cached.unifiedAttnMask, freqsCis: cached.unifiedFreqsCis, adalnInput: tEmb)
+      unified = block(unified, attnMask: nil, freqsCis: cached.unifiedFreqsCis, adalnInput: tEmb)
     }
 
     let imageOut = unified[0..., 0..<cached.imageTokens, 0...]

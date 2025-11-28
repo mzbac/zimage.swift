@@ -34,11 +34,7 @@ final class ZImageFinalLayer: Module {
   }
 
   func callAsFunction(_ x: MLXArray, conditioning c: MLXArray) -> MLXArray {
-    let delta = adaLN(c)
-    var scale = MLXArray(1.0) + delta
-    scale = MLX.expandedDimensions(scale, axis: 1)
-    var out = normFinal(x) * scale
-    out = linear(out)
-    return out
+    let scale = (1 + adaLN(c)).expandedDimensions(axis: 1)
+    return linear(normFinal(x) * scale)
   }
 }

@@ -53,45 +53,27 @@ public final class ZImageTransformerBlock: Module {
   ) -> MLXArray {
     var out = x
 
-    var scaleMsa: MLXArray = MLXArray(1.0)
-    var gateMsa: MLXArray = MLXArray(1.0)
-    var scaleMlp: MLXArray = MLXArray(1.0)
-    var gateMlp: MLXArray = MLXArray(1.0)
-
-    if modulation {
-      guard let c = adalnInput else {
-        fatalError("adalnInput required when modulation is enabled")
-      }
-      guard let adaLNModule = adaLN else {
-        fatalError("adaLN module should exist when modulation is enabled")
-      }
+    if modulation, let c = adalnInput, let adaLNModule = adaLN {
       let mod = adaLNModule[0](c)
-      let chunks = mod.split(parts: 4, axis: -1)
-      scaleMsa = MLXArray(1.0) + chunks[0]
-      gateMsa = MLX.tanh(chunks[1])
-      scaleMlp = MLXArray(1.0) + chunks[2]
-      gateMlp = MLX.tanh(chunks[3])
+      let chunkSize = dim
+
+      let attnScale = (1 + mod[0..., 0..<chunkSize])[.ellipsis, .newAxis, 0...]
+      let attnGate = MLX.tanh(mod[0..., chunkSize..<(2*chunkSize)])[.ellipsis, .newAxis, 0...]
+      let mlpScale = (1 + mod[0..., (2*chunkSize)..<(3*chunkSize)])[.ellipsis, .newAxis, 0...]
+      let mlpGate = MLX.tanh(mod[0..., (3*chunkSize)..<(4*chunkSize)])[.ellipsis, .newAxis, 0...]
+
+      let attnOut = attention(attentionNorm1(out) * attnScale, attnMask: attnMask, freqsCis: freqsCis)
+      out = out + attnGate * attentionNorm2(attnOut)
+
+      let ffnOut = feedForward(ffnNorm1(out) * mlpScale)
+      out = out + mlpGate * ffnNorm2(ffnOut)
+    } else {
+      let attnOut = attention(attentionNorm1(out), attnMask: attnMask, freqsCis: freqsCis)
+      out = out + attentionNorm2(attnOut)
+
+      let ffnOut = feedForward(ffnNorm1(out))
+      out = out + ffnNorm2(ffnOut)
     }
-
-    func expand(_ t: MLXArray) -> MLXArray {
-      if t.ndim == 0 {
-        return t
-      }
-      return MLX.expandedDimensions(t, axis: 1)
-    }
-
-    let attnScale = expand(scaleMsa)
-    let attnGate = expand(gateMsa)
-    let mlpScale = expand(scaleMlp)
-    let mlpGate = expand(gateMlp)
-
-    let attnInput = attentionNorm1(out) * attnScale
-    let attnOut = attention(attnInput, attnMask: attnMask, freqsCis: freqsCis)
-    out = out + attnGate * attentionNorm2(attnOut)
-
-    let ffnInput = ffnNorm1(out) * mlpScale
-    let ffnOut = feedForward(ffnInput)
-    out = out + mlpGate * ffnNorm2(ffnOut)
 
     return out
   }

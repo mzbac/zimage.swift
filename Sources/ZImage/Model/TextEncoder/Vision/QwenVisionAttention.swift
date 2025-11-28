@@ -53,14 +53,11 @@ final class QwenVisionAttention: Module {
 
     let maskMode: MLXFast.ScaledDotProductAttentionMaskMode = baseMask.map { .array($0) } ?? .none
 
-    let scaledQueries = q * MLXArray(self.scale, dtype: q.dtype)
-
-    var context: MLXArray
-    context = MLXFast.scaledDotProductAttention(
-      queries: scaledQueries,
+    var context = MLXFast.scaledDotProductAttention(
+      queries: q,
       keys: k,
       values: v,
-      scale: 1.0, // absorbed into queries
+      scale: scale,
       mask: maskMode
     )
     context = context.transposed(0, 2, 1, 3)
@@ -95,14 +92,9 @@ final class QwenVisionAttention: Module {
   }
 
   private func applyRotary(_ tensor: MLXArray, cos: MLXArray, sin: MLXArray) -> MLXArray {
-    var tensorFloat = tensor
-    var cosPrepared = cos
-    var sinPrepared = sin
-    cosPrepared = cosPrepared[.newAxis, .newAxis, 0..., 0...]
-    sinPrepared = sinPrepared[.newAxis, .newAxis, 0..., 0...]
-    let rotated = rotateHalf(tensorFloat)
-    tensorFloat = (tensorFloat * cosPrepared) + (rotated * sinPrepared)
-    return tensorFloat.asType(tensor.dtype)
+    let cosPrepared = cos[.newAxis, .newAxis, 0..., 0...]
+    let sinPrepared = sin[.newAxis, .newAxis, 0..., 0...]
+    return (tensor * cosPrepared) + (rotateHalf(tensor) * sinPrepared)
   }
 
   private func rotateHalf(_ tensor: MLXArray) -> MLXArray {

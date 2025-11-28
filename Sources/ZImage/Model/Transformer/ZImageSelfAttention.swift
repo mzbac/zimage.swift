@@ -8,6 +8,7 @@ final class ZImageSelfAttention: Module {
   let heads: Int
   let headDim: Int
   let useQKNorm: Bool
+  let scale: Float
 
   @ModuleInfo(key: "to_q") var toQ: Linear
   @ModuleInfo(key: "to_k") var toK: Linear
@@ -21,6 +22,7 @@ final class ZImageSelfAttention: Module {
     self.heads = heads
     self.headDim = dim / heads
     self.useQKNorm = qkNorm
+    self.scale = 1.0 / sqrt(Float(dim / heads))
 
     self._toQ.wrappedValue = Linear(dim, dim, bias: false)
     self._toK.wrappedValue = Linear(dim, dim, bias: false)
@@ -41,44 +43,30 @@ final class ZImageSelfAttention: Module {
     let batch = x.dim(0)
     let seqLen = x.dim(1)
 
-    var q = toQ(x)
-    var k = toK(x)
-    var v = toV(x)
-
-    q = q.reshaped(batch, seqLen, heads, headDim)
-    k = k.reshaped(batch, seqLen, heads, headDim)
-    v = v.reshaped(batch, seqLen, heads, headDim)
+    var q = toQ(x).reshaped(batch, seqLen, heads, headDim)
+    var k = toK(x).reshaped(batch, seqLen, heads, headDim)
+    let v = toV(x).reshaped(batch, seqLen, heads, headDim).transposed(0, 2, 1, 3)
 
     if useQKNorm {
-      if let normQ {
-        q = normQ(q)
-      }
-      if let normK {
-        k = normK(k)
-      }
+      if let normQ { q = normQ(q) }
+      if let normK { k = normK(k) }
     }
 
     if let freqsCis {
-      let rotated = ZImageAttentionUtils.applyComplexRoPEBLHD(query: q, key: k, freqsCis: freqsCis)
-      q = rotated.0
-      k = rotated.1
+      (q, k) = ZImageAttentionUtils.applyComplexRoPEBLHD(query: q, key: k, freqsCis: freqsCis)
     }
 
     q = q.transposed(0, 2, 1, 3)
     k = k.transposed(0, 2, 1, 3)
-    v = v.transposed(0, 2, 1, 3)
 
-    let scale = Float(1.0) / sqrt(Float(headDim))
-
-    var attn = MLXFast.scaledDotProductAttention(
+    let attn = MLXFast.scaledDotProductAttention(
       queries: q,
       keys: k,
       values: v,
       scale: scale,
       mask: attnMask
-    )
+    ).transposed(0, 2, 1, 3).reshaped(batch, seqLen, dim)
 
-    attn = attn.transposed(0, 2, 1, 3).reshaped(batch, seqLen, dim)
     return toOut[0](attn)
   }
 }

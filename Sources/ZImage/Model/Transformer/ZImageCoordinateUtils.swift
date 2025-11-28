@@ -9,20 +9,16 @@ enum ZImageCoordinateUtils {
   ) -> MLXArray {
     let (fSize, hSize, wSize) = size
     let (fStart, hStart, wStart) = start
+    let shape = [fSize, hSize, wSize]
 
-    var values: [Int32] = []
-    values.reserveCapacity(fSize * hSize * wSize * 3)
+    let fCoords = MLXArray(Int32(fStart)..<Int32(fStart + fSize))
+    let hCoords = MLXArray(Int32(hStart)..<Int32(hStart + hSize))
+    let wCoords = MLXArray(Int32(wStart)..<Int32(wStart + wSize))
 
-    for f in 0..<fSize {
-      for h in 0..<hSize {
-        for w in 0..<wSize {
-          values.append(Int32(fStart + f))
-          values.append(Int32(hStart + h))
-          values.append(Int32(wStart + w))
-        }
-      }
-    }
+    let fExpanded = MLX.broadcast(fCoords.reshaped(fSize, 1, 1), to: shape)
+    let hExpanded = MLX.broadcast(hCoords.reshaped(1, hSize, 1), to: shape)
+    let wExpanded = MLX.broadcast(wCoords.reshaped(1, 1, wSize), to: shape)
 
-    return MLXArray(values.map(Float32.init), [fSize, hSize, wSize, 3]).asType(.int32)
+    return MLX.stacked([fExpanded, hExpanded, wExpanded], axis: -1)
   }
 }
