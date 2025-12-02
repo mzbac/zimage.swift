@@ -18,6 +18,8 @@ public struct ZImageGenerationRequest {
   public var outputPath: URL
   public var model: String?
   public var maxSequenceLength: Int
+  public var loraPath: String?
+  public var loraScale: Float
 
   public init(
     prompt: String,
@@ -29,7 +31,9 @@ public struct ZImageGenerationRequest {
     seed: UInt64? = nil,
     outputPath: URL = URL(fileURLWithPath: "z-image.png"),
     model: String? = nil,
-    maxSequenceLength: Int = 512
+    maxSequenceLength: Int = 512,
+    loraPath: String? = nil,
+    loraScale: Float = 1.0
   ) {
     self.prompt = prompt
     self.negativePrompt = negativePrompt
@@ -41,6 +45,8 @@ public struct ZImageGenerationRequest {
     self.outputPath = outputPath
     self.model = model
     self.maxSequenceLength = maxSequenceLength
+    self.loraPath = loraPath
+    self.loraScale = loraScale
   }
 }
 
@@ -159,6 +165,13 @@ public struct ZImagePipeline {
     let transformer = try loadTransformer(snapshot: snapshot, config: modelConfigs.transformer)
     let transformerWeights = try weightsMapper.loadTransformer()
     ZImageWeightsMapping.applyTransformer(weights: transformerWeights, to: transformer, manifest: quantManifest, logger: logger)
+
+    if let loraPath = request.loraPath {
+      logger.info("Loading LoRA weights from: \(loraPath)")
+      let loraLoader = LoRALoader(logger: logger, hubApi: hubApi)
+      let loraWeights = try await loraLoader.loadLoRAWeights(from: loraPath)
+      applyLoRAWeights(to: transformer, loraWeights: loraWeights, loraScale: request.loraScale, logger: logger)
+    }
 
     let vaeDivisor = modelConfigs.vae.latentDivisor
     let latentH = max(1, request.height / vaeDivisor)

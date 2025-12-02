@@ -36,6 +36,8 @@ struct ZImageCLI {
     var model: String?
     var cacheLimit: Int?
     var maxSequenceLength = 512
+    var loraPath: String?
+    var loraScale: Float = 1.0
 
     let args = Array(CommandLine.arguments.dropFirst())
     var iterator = args.makeIterator()
@@ -64,6 +66,10 @@ struct ZImageCLI {
         cacheLimit = intValue(for: arg, iterator: &iterator, minimum: 1, fallback: 2048)
       case "--max-sequence-length":
         maxSequenceLength = intValue(for: arg, iterator: &iterator, minimum: 64, fallback: 512)
+      case "--lora", "-l":
+        loraPath = nextValue(for: arg, iterator: &iterator)
+      case "--lora-scale":
+        loraScale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
       case "--help", "-h":
         printUsage()
         return
@@ -95,7 +101,9 @@ struct ZImageCLI {
       seed: seed,
       outputPath: URL(fileURLWithPath: outputPath),
       model: model,
-      maxSequenceLength: maxSequenceLength
+      maxSequenceLength: maxSequenceLength,
+      loraPath: loraPath,
+      loraScale: loraScale
     )
 
     let pipeline = ZImagePipeline(logger: logger)
@@ -127,6 +135,8 @@ struct ZImageCLI {
       --model, -m            Model path or HuggingFace ID (default: \(ZImageRepository.id))
       --cache-limit          GPU memory cache limit in MB (default: unlimited)
       --max-sequence-length  Maximum sequence length for text encoding (default: 512)
+      --lora, -l             LoRA weights path or HuggingFace ID
+      --lora-scale           LoRA scale factor (default: 1.0)
       --help, -h             Show help
 
     Subcommands:
@@ -141,6 +151,7 @@ struct ZImageCLI {
       ZImageCLI -p "a cute cat" -o cat.png
       ZImageCLI -p "a sunset" -m models/z-image-turbo-q8
       ZImageCLI -p "a forest" -m Tongyi-MAI/Z-Image-Turbo
+      ZImageCLI -p "a cut a cat" --lora ostris/z_image_turbo_childrens_drawings
     """)
   }
 
