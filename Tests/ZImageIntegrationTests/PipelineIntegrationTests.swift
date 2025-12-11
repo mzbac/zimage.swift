@@ -1,5 +1,7 @@
 import XCTest
 import MLX
+import Hub
+import Logging
 @testable import ZImage
 
 /// Integration tests for ZImagePipeline using real model inference.
@@ -200,6 +202,65 @@ final class PipelineIntegrationTests: XCTestCase {
     let pngSignature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     let fileSignature = [UInt8](data.prefix(8))
     XCTAssertEqual(fileSignature, pngSignature, "Output should be a valid PNG file")
+  }
+
+  // MARK: - Prompt Enhancement Tests
+
+  func testPromptEnhancement() async throws {
+    try skipIfNoGPU()
+
+    // Load text encoder and tokenizer for direct enhancement testing
+    let snapshot = try await loadSnapshot()
+    let modelConfigs = try ZImageModelConfigs.load(from: snapshot)
+    let logger = Logger(label: "test.prompt-enhancement")
+    let weightsMapper = ZImageWeightsMapper(snapshot: snapshot, logger: logger)
+    let quantManifest = weightsMapper.loadQuantizationManifest()
+
+    let tokenizer = try QwenTokenizer.load(from: snapshot.appending(path: "tokenizer"))
+    let textEncoder = QwenTextEncoder(
+      configuration: .init(
+        vocabSize: modelConfigs.textEncoder.vocabSize,
+        hiddenSize: modelConfigs.textEncoder.hiddenSize,
+        numHiddenLayers: modelConfigs.textEncoder.numHiddenLayers,
+        numAttentionHeads: modelConfigs.textEncoder.numAttentionHeads,
+        numKeyValueHeads: modelConfigs.textEncoder.numKeyValueHeads,
+        intermediateSize: modelConfigs.textEncoder.intermediateSize,
+        ropeTheta: modelConfigs.textEncoder.ropeTheta,
+        maxPositionEmbeddings: modelConfigs.textEncoder.maxPositionEmbeddings,
+        rmsNormEps: modelConfigs.textEncoder.rmsNormEps,
+        headDim: modelConfigs.textEncoder.headDim
+      )
+    )
+    let textEncoderWeights = try weightsMapper.loadTextEncoder()
+    ZImageWeightsMapping.applyTextEncoder(weights: textEncoderWeights, to: textEncoder, manifest: quantManifest, logger: logger)
+
+    let originalPrompt = "a cat"
+    let config = PromptEnhanceConfig(
+      maxNewTokens: 512,
+      temperature: 0.7,
+      topP: 0.9,
+      repetitionPenalty: 1.05
+    )
+
+    let enhancedPrompt = try textEncoder.enhancePrompt(originalPrompt, tokenizer: tokenizer, config: config)
+
+    // Verify enhancement produced a non-empty result
+    XCTAssertFalse(enhancedPrompt.isEmpty, "Enhanced prompt should not be empty")
+
+    // Verify enhanced prompt is longer and more detailed than original
+    XCTAssertGreaterThan(enhancedPrompt.count, originalPrompt.count, "Enhanced prompt should be longer than original")
+
+    // Verify enhanced prompt doesn't contain thinking tags (they should be stripped)
+    XCTAssertFalse(enhancedPrompt.contains("<think>"), "Enhanced prompt should not contain <think> tag")
+    XCTAssertFalse(enhancedPrompt.contains("</think>"), "Enhanced prompt should not contain </think> tag")
+  }
+
+  /// Helper to load model snapshot for testing
+  private func loadSnapshot() async throws -> URL {
+    let hubApi = HubApi.shared
+    let repo = Hub.Repo(id: "mzbac/z-image-turbo-8bit")
+    let filePatterns = ["*.json", "*.safetensors", "tokenizer/*"]
+    return try await hubApi.snapshot(from: repo, matching: filePatterns)
   }
 
   // MARK: - Helper Functions
